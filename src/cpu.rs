@@ -35,12 +35,35 @@ pub const T4: usize = 29;
 pub const T5: usize = 30;
 pub const T6: usize = 31;
 
+// CSRs
+
+// Machine trap setup
+const MSTATUS: usize = 0x300;
+const MISA: usize = 0x301;
+const MEDELEG: usize = 0x302;
+const MIDELEG: usize = 0x303;
+const MIE: usize = 0x304;
+const MTVEC: usize = 0x305;
+const MCOUNTEREN: usize = 0x306;
+const MSTATUSH: usize = 0x310;
+const MEDELEGH: usize = 0x312;
+
+// Machine trap handling
+const MSCRATCH: usize = 0x340;
+const MEPC: usize = 0x341;
+const MCAUSE: usize = 0x342;
+const MTVAL: usize = 0x343;
+const MIP: usize = 0x344;
+const MTINST: usize = 0x34a;
+const MTVAL2: usize = 0x34b;
+
 pub struct Cpu {
     x: [u64; 32],
     pc: u64,
     bus: Bus,
     xlen: Xlen,
     csr: [u64; 4096],
+    privilege_mode: PrivilegeMode,
 }
 
 impl Cpu {
@@ -51,12 +74,27 @@ impl Cpu {
             bus: Bus::new(Dram::new(0x8000_0000, 1 * 1024 * 1024, code)),
             xlen,
             csr: [0; 4096],
+            privilege_mode: PrivilegeMode::Machine,
         }
     }
 
-    pub fn tick(&mut self) {
+    pub fn dump(&self) {
+        println!(
+            "CPU state:\n- GP: {:?}\n- PC: {}\n- mstatus: {}\n- mepc: {}\n- mtvec: {}\n- Privilege: {:?}",
+            self.x,
+            self.pc,
+            self.csr[MSTATUS],
+            self.csr[MEPC],
+            self.csr[MTVEC],
+            self.privilege_mode
+        );
+    }
+
+    pub fn step(&mut self) {
         let instruction = self.fetch();
-        self.decode_and_execute(instruction);
+        if let Err((kind, information)) = self.execute(instruction) {
+            self.trap(kind, information);
+        }
     }
 
     fn fetch(&mut self) -> u32 {
@@ -65,11 +103,90 @@ impl Cpu {
         instruction
     }
 
-    fn decode_and_execute(&mut self, instruction: u32) {
+    fn read_csr(&self, number: usize) -> u64 {
+        let min_privilege_mode = (number >> 8) & 0x3;
+        if min_privilege_mode > self.privilege_mode.value() {
+            panic!("Read a CSR in lower privilege mode");
+        }
+        self.csr[number]
+    }
+
+    fn write_csr(&mut self, number: usize, value: u64) {
+        let access_mode = (number >> 10) & 0x3;
+        let min_privilege_mode = (number >> 8) & 0x3;
+        if min_privilege_mode > self.privilege_mode.value() {
+            panic!("Write a CSR in lower privilege mode");
+        }
+        if access_mode == 0b10 {
+            panic!("Write to a read-only CSR");
+        }
+        self.csr[number] = value;
+    }
+
+    fn trap(&mut self, kind: Trap, trap_information: u64) {
+        // Cpu behavior, so use direct access to CSRs
+        // instead of write_csr and read_csr
+        self.csr[MEPC] = self.pc - 4;
+        self.pc = self.csr[MTVEC];
+        self.csr[MCAUSE] = kind.value(self.xlen);
+        self.csr[MTVAL] = trap_information;
+        let mut mstatus = self.csr[MSTATUS];
+        let mie = (mstatus >> 3) & 0x1;
+        // Clear mstatus.MIE
+        mstatus &= !(1 << 3);
+        // mstatus.MPIE = mstatus.MIE
+        mstatus |= mie << 7;
+        // mstatus.MPP = privilege mode
+        let mpp_mask = 0b0001_1000_0000_0000;
+        mstatus = (mstatus & !mpp_mask) | ((self.privilege_mode.value() << 11) as u64);
+        self.csr[MSTATUS] = mstatus;
+        // Switch privilege mode
+        self.privilege_mode = PrivilegeMode::Machine;
+
+        self.handle_trap(kind, trap_information);
+    }
+
+    fn handle_trap(&mut self, kind: Trap, information: u64) {
+        use Trap::*;
+
+        match kind {
+            SupervisorSoftwareInterrupt => todo!(),
+            MachineSoftwareInterrupt => todo!(),
+            SuperviserTimerInterrupt => todo!(),
+            MachineTimerInterrupt => todo!(),
+            SupervisorExternalInterrupt => todo!(),
+            MachineExternalInterrupt => todo!(),
+            CounterOverflowInterrupt => todo!(),
+            InstructionAddressMisaligned => todo!(),
+            InstructionAccessFault => todo!(),
+            IllegalInstruction => todo!(),
+            Breakpoint => todo!(),
+            LoadAddressMisaligned => todo!(),
+            LoadAccessFault => todo!(),
+            StoreOrAmoAddressMisaligned => todo!(),
+            StoreOrAmoAccessFault => todo!(),
+            UModeEnvironmentCall | SModeEnvironmentCall | MModeEnvironemntCall => {}
+            LoadPageFault => todo!(),
+            InstructionPageFault => todo!(),
+            StoreOrAmoPageFault => todo!(),
+            DoubleTrap => todo!(),
+            SoftwareCheck => todo!(),
+            HardwareError => todo!(),
+        }
+    }
+
+    fn execute(&mut self, instruction: u32) -> Result<(), (Trap, u64)> {
+        use Trap::*;
+
+        // 0x00000000 is halt
+        if instruction == 0x0 {
+            println!("Illegal opcode");
+            self.dump();
+            panic!("Halt");
+        }
+
         let opcode = instruction & 0x7f;
         match opcode {
-            // RV32I/RV64I
-
             // lui
             0b011_0111 => {
                 let U { rd, imm, .. } = U::new(instruction);
@@ -96,7 +213,7 @@ impl Cpu {
                     0b001 => {
                         let shamt = imm & 0x1f;
                         if self.xlen == Xlen::Bit32 && (shamt >> 5) & 0x1 == 1 {
-                            panic!("Illegal instruction format");
+                            return Err((IllegalInstruction, 0));
                         }
                         self.x[rd] = self.x[rs1] << shamt;
                     }
@@ -120,21 +237,21 @@ impl Cpu {
                     0b101 => {
                         let shamt = instruction & 0x1f;
                         if self.xlen == Xlen::Bit32 && (shamt >> 5) & 0x1 == 1 {
-                            panic!("Illegal instruction format");
+                            return Err((IllegalInstruction, 0));
                         }
                         match (instruction >> 25) & 0x7f {
                             // srli
                             0b000_0000 => self.x[rd] = self.x[rs1] << shamt,
                             // srai
                             0b010_0000 => self.x[rd] = ((self.x[rs1] as i64) << shamt) as u64,
-                            _ => panic!("Illegal instruction format"),
+                            _ => return Err((IllegalInstruction, 0)),
                         }
                     }
                     // ori
                     0b110 => self.x[rd] = self.x[rs1] | sign_extend(imm, 12, self.xlen),
                     // andi
                     0b111 => self.x[rd] = self.x[rs1] & sign_extend(imm, 12, self.xlen),
-                    _ => panic!("Illegal instruction format"),
+                    _ => return Err((IllegalInstruction, 0)),
                 }
             }
             0b011_0011 => {
@@ -154,7 +271,7 @@ impl Cpu {
                             0b000_0000 => self.x[rd] = self.x[rs1].wrapping_add(self.x[rs2]),
                             // sub
                             0b011_0000 => self.x[rd] = self.x[rs1].wrapping_sub(self.x[rs2]),
-                            _ => panic!("Illegal instruction format"),
+                            _ => return Err((IllegalInstruction, 0)),
                         }
                     }
                     // sll
@@ -183,12 +300,12 @@ impl Cpu {
                             0b010_0000 => {
                                 self.x[rd] = ((self.x[rs1] as i64) >> self.x[rs2]) as u64;
                             }
-                            _ => panic!("Illegal instruction format"),
+                            _ => return Err((IllegalInstruction, 0)),
                         }
                     }
                     // and
                     0b111 => self.x[rd] = self.x[rs1] ^ self.x[rs2],
-                    _ => panic!("Illegal instruction format"),
+                    _ => return Err((IllegalInstruction, 0)),
                 }
             }
             0b000_1111 => {
@@ -201,7 +318,7 @@ impl Cpu {
                     0b000 => unimplemented!("Fence"),
                     // fence.i
                     0b001 => unimplemented!("Fence.i"),
-                    _ => panic!("Illegal instruction format"),
+                    _ => return Err((IllegalInstruction, 0)),
                 }
             }
             0b111_0011 => {
@@ -218,48 +335,57 @@ impl Cpu {
                     // csrrw
                     0b001 => {
                         if rd == ZERO {
-                            self.csr[csr] = self.x[rs1];
+                            self.write_csr(csr, self.x[rs1]);
                         } else {
-                            let t = self.csr[csr];
-                            self.csr[csr] = self.x[rs1];
+                            let t = self.read_csr(csr);
+                            self.write_csr(csr, self.x[rs1]);
                             self.x[rd] = t;
                         }
                     }
                     // csrrs
                     0b010 => {
-                        let t = self.csr[csr];
-                        self.csr[csr] = t | self.x[rs1];
+                        let t = self.read_csr(csr);
+                        self.write_csr(csr, t | self.x[rs1]);
                         self.x[rd] = t;
                     }
                     // csrrc
                     0b011 => {
-                        let t = self.csr[csr];
-                        self.csr[csr] = t & !self.x[rs1];
+                        let t = self.read_csr(csr);
+                        self.write_csr(csr, t & !self.x[rs1]);
                         self.x[rd] = t;
                     }
                     // csrrwi
                     0b101 => {
-                        self.x[rd] = self.csr[csr];
-                        self.csr[csr] = self.x[rs1] & 0x1f;
+                        self.x[rd] = self.read_csr(csr);
+                        self.write_csr(csr, (rs1 as u64) & 0x1f);
                     }
                     // csrrsi
                     0b110 => {
-                        let t = self.csr[csr];
-                        self.csr[csr] = t | (self.x[rs1] & 0x1f);
+                        let t = self.read_csr(csr);
+                        self.write_csr(csr, t | ((rs1 as u64) & 0x1f));
                         self.x[rd] = t;
                     }
                     // csrrci
                     0b111 => {
-                        let t = self.csr[csr];
-                        self.csr[csr] = t & !(self.x[rs1] & 0x1f);
+                        let t = self.read_csr(csr);
+                        self.write_csr(csr, t & !((rs1 as u64) & 0x1f));
                         self.x[rd] = t;
                     }
                     0b000 => {
                         match imm {
                             // ecall
-                            0b0000_0000_0000 => unimplemented!("Ecall"),
+                            0b0000_0000_0000 => {
+                                use PrivilegeMode::*;
+
+                                let kind = match self.privilege_mode {
+                                    Machine => MModeEnvironemntCall,
+                                    Supervisor => SModeEnvironmentCall,
+                                    User => UModeEnvironmentCall,
+                                };
+                                return Err((kind, 0));
+                            }
                             // ebreak
-                            0b0000_0000_0001 => unimplemented!("Ebreak"),
+                            0b0000_0000_0001 => return Err((Breakpoint, self.pc - 4)),
                             _ => {
                                 let R {
                                     funct7, rs2, rs1, ..
@@ -270,19 +396,32 @@ impl Cpu {
                                         // sret
                                         0b000_0100 => unimplemented!("Sret"),
                                         // mret
-                                        0b001_1000 => unimplemented!("Mret"),
-                                        _ => panic!("Illegal instruction format"),
+                                        0b001_1000 => {
+                                            if self.privilege_mode != PrivilegeMode::Machine {
+                                                return Err((IllegalInstruction, 0));
+                                            }
+                                            // M-mode now, direct access for optimization
+                                            self.pc = self.csr[MEPC];
+                                            self.privilege_mode = PrivilegeMode::from(
+                                                (self.csr[MSTATUS] >> 11) & 0x3,
+                                            );
+                                            let mpie = (self.csr[MSTATUS] >> 7) & 0x1;
+                                            let mask = 0b1_1000_1000_1000;
+                                            self.csr[MSTATUS] =
+                                                (self.csr[MSTATUS] & !mask) | (mpie << 7);
+                                        }
+                                        _ => return Err((IllegalInstruction, 0)),
                                     },
                                     // wfi
                                     0b0_0101 => unimplemented!("Wfi"),
                                     // sfence.vma
                                     _ if funct7 == 0b000_1001 => unimplemented!("Sfence.vma"),
-                                    _ => panic!("Illegal instruction format"),
+                                    _ => return Err((IllegalInstruction, 0)),
                                 }
                             }
                         }
                     }
-                    _ => panic!("Illegal instruction format"),
+                    _ => return Err((IllegalInstruction, 0)),
                 }
             }
             0b000_0011 => {
@@ -340,7 +479,7 @@ impl Cpu {
                             16,
                         );
                     }
-                    _ => panic!("Illegal instruction format"),
+                    _ => return Err((IllegalInstruction, 0)),
                 }
             }
             0b010_0011 => {
@@ -377,7 +516,7 @@ impl Cpu {
                             self.x[rs2] & 0xff,
                         );
                     }
-                    _ => panic!("Illegal instruction format"),
+                    _ => return Err((IllegalInstruction, 0)),
                 }
             }
             // jal
@@ -440,16 +579,14 @@ impl Cpu {
                             self.pc = self.pc.wrapping_add(sign_extend(imm, 13, self.xlen));
                         }
                     }
-                    _ => panic!("Illegal instruction format"),
+                    _ => return Err((IllegalInstruction, 0)),
                 }
             }
-            _ => panic!(
-                "Illegal opcode, CPU state:\n- GP: {:?}\n- PC: {}",
-                self.x, self.pc
-            ),
+            _ => return Err((IllegalInstruction, 0)),
         }
         // Harewired to zero
         self.x[ZERO] = 0;
+        Ok(())
     }
 }
 
@@ -465,6 +602,104 @@ impl Xlen {
             Self::Bit32 => 32,
             Self::Bit64 => 64,
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
+enum PrivilegeMode {
+    User,
+    Supervisor,
+    Machine,
+}
+
+impl PrivilegeMode {
+    fn value(&self) -> usize {
+        match self {
+            Self::Machine => 0b11,
+            Self::Supervisor => 0b01,
+            Self::User => 0b00,
+        }
+    }
+
+    fn from(x: u64) -> Self {
+        match x {
+            0b11 => Self::Machine,
+            0b01 => Self::Supervisor,
+            0b00 => Self::User,
+            _ => unreachable!(),
+        }
+    }
+}
+
+enum Trap {
+    SupervisorSoftwareInterrupt,
+    MachineSoftwareInterrupt,
+    SuperviserTimerInterrupt,
+    MachineTimerInterrupt,
+    SupervisorExternalInterrupt,
+    MachineExternalInterrupt,
+    CounterOverflowInterrupt,
+    InstructionAddressMisaligned,
+    InstructionAccessFault,
+    IllegalInstruction,
+    Breakpoint,
+    LoadAddressMisaligned,
+    LoadAccessFault,
+    StoreOrAmoAddressMisaligned,
+    StoreOrAmoAccessFault,
+    UModeEnvironmentCall,
+    SModeEnvironmentCall,
+    MModeEnvironemntCall,
+    LoadPageFault,
+    InstructionPageFault,
+    StoreOrAmoPageFault,
+    DoubleTrap,
+    SoftwareCheck,
+    HardwareError,
+}
+
+impl Trap {
+    fn value(&self, xlen: Xlen) -> u64 {
+        use Trap::*;
+
+        let bits = xlen.bits();
+        let interrupt = match self {
+            SupervisorSoftwareInterrupt
+            | MachineSoftwareInterrupt
+            | SuperviserTimerInterrupt
+            | MachineTimerInterrupt
+            | SupervisorExternalInterrupt
+            | MachineExternalInterrupt
+            | CounterOverflowInterrupt => 1,
+            _ => 0,
+        };
+        let exception_code = match self {
+            SupervisorSoftwareInterrupt => 1,
+            MachineSoftwareInterrupt => 3,
+            SuperviserTimerInterrupt => 5,
+            MachineTimerInterrupt => 7,
+            SupervisorExternalInterrupt => 9,
+            MachineExternalInterrupt => 11,
+            CounterOverflowInterrupt => 13,
+            InstructionAddressMisaligned => 0,
+            InstructionAccessFault => 1,
+            IllegalInstruction => 2,
+            Breakpoint => 3,
+            LoadAddressMisaligned => 4,
+            LoadAccessFault => 5,
+            StoreOrAmoAddressMisaligned => 6,
+            StoreOrAmoAccessFault => 7,
+            UModeEnvironmentCall => 8,
+            SModeEnvironmentCall => 9,
+            MModeEnvironemntCall => 11,
+            InstructionPageFault => 12,
+            LoadPageFault => 13,
+            StoreOrAmoPageFault => 15,
+            DoubleTrap => 16,
+            SoftwareCheck => 18,
+            HardwareError => 19,
+        };
+        (interrupt << (bits - 1)) | exception_code
     }
 }
 

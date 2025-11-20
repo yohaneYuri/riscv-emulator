@@ -20,7 +20,7 @@ impl Emulator {
 
     pub fn run(&mut self) {
         while true {
-            self.cpu.tick();
+            self.cpu.step();
         }
     }
 }
