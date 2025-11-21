@@ -10,10 +10,6 @@ impl Dram {
     }
 
     pub fn load(&self, address: u64, size: usize) -> u64 {
-        if !matches!(size, 8 | 16 | 32 | 64) {
-            panic!("Invalid load data size");
-        }
-
         let address = address as usize;
         let mut data = self.cells[address] as u64;
         if size > 8 {
@@ -32,10 +28,6 @@ impl Dram {
     }
 
     pub fn store(&mut self, address: u64, size: usize, value: u64) {
-        if !matches!(size, 8 | 16 | 32 | 64) {
-            panic!("Invalid store data size");
-        }
-
         let address = address as usize;
         self.cells[address] = (value & 0xff) as u8;
         if size > 8 {

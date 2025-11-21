@@ -1,0 +1,89 @@
+// General purpose register alias
+pub const ZERO: usize = 0;
+pub const RA: usize = 1;
+pub const SP: usize = 2;
+pub const GP: usize = 3;
+pub const TP: usize = 4;
+pub const T0: usize = 5;
+pub const T1: usize = 6;
+pub const T2: usize = 7;
+pub const S0: usize = 8;
+pub const FP: usize = 8;
+pub const S1: usize = 9;
+pub const A0: usize = 10;
+pub const A1: usize = 11;
+pub const A2: usize = 12;
+pub const A3: usize = 13;
+pub const A4: usize = 14;
+pub const A5: usize = 15;
+pub const A6: usize = 16;
+pub const A7: usize = 17;
+pub const S2: usize = 18;
+pub const S3: usize = 19;
+pub const S4: usize = 20;
+pub const S5: usize = 21;
+pub const S6: usize = 22;
+pub const S7: usize = 23;
+pub const S8: usize = 24;
+pub const S9: usize = 25;
+pub const S10: usize = 26;
+pub const S11: usize = 27;
+pub const T3: usize = 28;
+pub const T4: usize = 29;
+pub const T5: usize = 30;
+pub const T6: usize = 31;
+// CSRs
+
+// Machine trap setup
+pub const MSTATUS: usize = 0x300;
+pub const MISA: usize = 0x301;
+pub const MEDELEG: usize = 0x302;
+pub const MIDELEG: usize = 0x303;
+pub const MIE: usize = 0x304;
+pub const MTVEC: usize = 0x305;
+pub const MCOUNTEREN: usize = 0x306;
+pub const MSTATUSH: usize = 0x310;
+pub const MEDELEGH: usize = 0x312;
+
+// Machine trap handling
+pub const MSCRATCH: usize = 0x340;
+pub const MEPC: usize = 0x341;
+pub const MCAUSE: usize = 0x342;
+pub const MTVAL: usize = 0x343;
+pub const MIP: usize = 0x344;
+pub const MTINST: usize = 0x34a;
+pub const MTVAL2: usize = 0x34b;
+
+// Machine memory protection
+pub const PMPCFG0: usize = 0x3a0;
+pub const PMPCFG1: usize = 0x3a1;
+pub const PMPCFG2: usize = 0x3a2;
+pub const PMPCFG3: usize = 0x3a3;
+pub const PMPCFG4: usize = 0x3a4;
+pub const PMPCFG5: usize = 0x3a5;
+pub const PMPCFG6: usize = 0x3a6;
+pub const PMPCFG7: usize = 0x3a7;
+pub const PMPCFG8: usize = 0x3a8;
+pub const PMPCFG9: usize = 0x3a9;
+pub const PMPCFG10: usize = 0x3aa;
+pub const PMPCFG11: usize = 0x3ab;
+pub const PMPCFG12: usize = 0x3ac;
+pub const PMPCFG13: usize = 0x3ad;
+pub const PMPCFG14: usize = 0x3ae;
+pub const PMPCFG15: usize = 0x3af;
+pub const PMPADDR0: usize = 0x3b0;
+pub const PMPADDR1: usize = 0x3b1;
+pub const PMPADDR2: usize = 0x3b2;
+pub const PMPADDR3: usize = 0x3b3;
+pub const PMPADDR4: usize = 0x3b4;
+pub const PMPADDR5: usize = 0x3b5;
+pub const PMPADDR6: usize = 0x3b6;
+pub const PMPADDR7: usize = 0x3b7;
+pub const PMPADDR8: usize = 0x3b8;
+pub const PMPADDR9: usize = 0x3b9;
+pub const PMPADDR10: usize = 0x3ba;
+pub const PMPADDR11: usize = 0x3bb;
+pub const PMPADDR12: usize = 0x3bc;
+pub const PMPADDR13: usize = 0x3bd;
+pub const PMPADDR14: usize = 0x3be;
+pub const PMPADDR15: usize = 0x3bf;
